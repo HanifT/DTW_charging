@@ -234,11 +234,11 @@ def calling_data():
 	data_trips_temp = data_trips_temp[~data_trips_temp["energy[consumption]"].isna()]
 	data_trips_temp = data_trips_temp[data_trips_temp["energy[consumption]"] < 0]
 	data_trips_temp = data_trips_temp[data_trips_temp["distance"] > 0]
-	data_trips_temp["energy_kwh/m"] = abs(data_trips_temp["energy[consumption]"] / data_trips_temp["distance"])
-	data_trips_temp = data_trips_temp[data_trips_temp["energy_kwh/m"] < 1]
+	data_trips_temp["energy_kwh/mi"] = abs(data_trips_temp["energy[consumption]"] / data_trips_temp["distance"])
+	data_trips_temp = data_trips_temp[data_trips_temp["energy_kwh/mi"] < 1]
 	data_trips_temp["temperature"] = data_trips_temp["temperature"].round(2)
 	# Convert energy consumption from kWh/mile to J/meter
-	data_trips_temp["energy_kwh/m"] = (data_trips_temp["energy_kwh/m"] * 3.6e6) / 1609.34
+	data_trips_temp["energy_j/m"] = (data_trips_temp["energy_kwh/mi"] * 3.6e6) / 1609.34
 	return data_trips_temp
 
 
@@ -415,13 +415,52 @@ def fahrenheit_to_celsius():
 
     return temp_avg
 #%%
+
+def fit_with_poly():
+    data_trips_temp = calling_data()
+    df = data_trips_temp.copy()
+    # Round temperatures to the nearest integer
+    df['temperature_rounded'] = df['temperature'].round(0).astype(int)
+    df = df[(df["temperature_rounded"]>0) & (df["temperature_rounded"]<46)]
+    # Compute the mean energy consumption for each rounded temperature
+    mean_data = df.groupby('temperature_rounded')['energy_j/m'].mean().reset_index()
+
+    # Fit a polynomial (e.g., degree 2) to the mean data
+    poly_degree = 2  # Change the degree as needed
+    coeffs = np.polyfit(mean_data['temperature_rounded'], mean_data['energy_j/m'], poly_degree)
+    poly_func = np.poly1d(coeffs)
+
+    # Generate values for the polynomial curve
+    temperature_range = np.linspace(df['temperature_rounded'].min(), df['temperature_rounded'].max(), 500)
+    fitted_values = poly_func(temperature_range)
+
+    # Create the box plot
+    plt.figure(figsize=(12, 6))
+    df.boxplot(column='energy_j/m', by='temperature_rounded', grid=False, showfliers=False)
+
+    # Add the polynomial fit line
+    plt.plot(temperature_range, fitted_values, color='red', label=f'Polynomial Fit (Degree {poly_degree})')
+
+    # Customize the plot
+    plt.title('Energy Consumption by Rounded Temperature with Polynomial Fit')
+    plt.suptitle('')  # Remove automatic subtitle
+    plt.xlabel('Temperature (°C)')
+    plt.ylabel('Energy Consumption')
+    plt.xticks(rotation=90)
+    plt.legend()
+    plt.tight_layout()
+
+    # Show the plot
+    plt.show()
+
+
 def final_temp_adjustment():
 
     data_trips_temp = calling_data()
-    polynomial_function = fit_with_ridge_with_equation(data_trips_temp, "temperature", "energy_kwh/m", degree=3, alpha=0.5)
+    polynomial_function = fit_with_ridge_with_equation(data_trips_temp, "temperature", "energy_kwh/mi", degree=3, alpha=0.5)
+    fit_with_poly()
     state_temp_data = fahrenheit_to_celsius()
     # Apply the polynomial function to calculate energy consumption
     state_temp_data = apply_polynomial_to_state_data(state_temp_data, polynomial_function)
     state_temp_data = state_mapping(state_temp_data)
     return state_temp_data
-

@@ -7,77 +7,56 @@ import seaborn as sns
 from datetime import datetime, timedelta
 import numpy as np
 
+
 # %%
 def _print(string, disp=True):
-
     if disp:
-
         print(string)
 
-def load(codex_path, verbose = False):
-	'''
-	Load data based on a codex file. the codex file will be a JSON of the below format:
 
-	[
-		{
-			"name": <variable name>,
-			"file": <file name>,
-			"kwargs": {
-				<argument>: <value>,
-				<argument>: <value>
-			}
-		}
-	]
+def load(codex_path, verbose=False):
+    t0 = time.time()
 
-	Files must be CSV or Excel types. Files will be loaded using the appropriate Pandas
-	method with **kwargs as inputs.
+    # Getting file parts for codex
 
-	Output will be a dictionary of {<name>: <DataFrame>}
-	'''
+    codex_directory, codex_file = os.path.split(codex_path)
 
-	t0 = time.time()
+    # Loading codex file
 
-	# Getting file parts for codex
+    with open(codex_path, 'r') as file:
 
-	codex_directory, codex_file = os.path.split(codex_path)
+        codex = json.load(file)
 
-	# Loading codex file
+    # Loading in data
 
-	with open(codex_path, 'r') as file:
+    data = {}
 
-		codex = json.load(file)
+    for item in codex:
 
-	# Loading in data
+        extension = item['file'].split('.')[-1]
 
-	data = {}
+        load_path = os.path.join(codex_directory, item['file'])
 
-	for item in codex:
+        if extension == 'csv':
 
-		extension = item['file'].split('.')[-1]
+            data[item['name']] = pd.read_csv(load_path, **item['kwargs'])
 
-		load_path = os.path.join(codex_directory, item['file'])
+        elif (extension == 'xlsx') or (extension == 'xls'):
 
-		if extension == 'csv':
+            data[item['name']] = pd.read_excel(load_path, **item['kwargs'])
 
-			data[item['name']] = pd.read_csv(load_path, **item['kwargs'])
+        else:
 
-		elif (extension == 'xlsx') or (extension == 'xls'):
+            raise RawDataFileTypeException
 
-			data[item['name']] = pd.read_excel(load_path, **item['kwargs'])
+    _print(f'Data loaded: {time.time() - t0:.4} seconds', disp=verbose)
 
-		else:
+    return data
 
-			raise RawDataFileTypeException
-
-	_print(f'Data loaded: {time.time() - t0:.4} seconds', disp = verbose)
-
-	return data
 
 class RawDataFileTypeException(Exception):
+    pass
 
-	"Raw data input files must be .csv, .xls, or .xlsx"
-
-	pass
 
 def plot_charging_demand(df, plot_type='total'):
     """
@@ -137,7 +116,6 @@ def plot_charging_demand(df, plot_type='total'):
 
 
 def plot_days_between_charges(data, min_energy=2, min_days=0, max_days=10, excluded_makes=["Nissan", "Toyota"]):
-
     # Exclude specific vehicle makes
     data_filtered = data[~data["Make"].isin(excluded_makes)]
 
@@ -184,7 +162,6 @@ def plot_days_between_charges(data, min_energy=2, min_days=0, max_days=10, exclu
     return data_filtered, df_grouped
 
 
-
 def add_order_column(df):
     # Use groupby and cumcount to create the 'order' column
     df['order'] = df.groupby(['HOUSEID', 'PERSONID', 'VEHID']).cumcount() + 1
@@ -197,7 +174,7 @@ def assign_days_of_week(df):
     days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
     # Sort by HOUSEID, PERSONID, VEHID, and STRTTIME to ensure chronological order
-    df = df.sort_values(by=['HOUSEID', 'PERSONID', 'VEHID', "order"]).reset_index(drop=True)
+    df = df.sort_values(by=['HOUSEID', 'PERSONID', 'VEHID', "order", "TripOrder"]).reset_index(drop=True)
 
     # Initialize an empty list to store the day of the week for each trip
     day_of_week_column = []
@@ -219,7 +196,7 @@ def assign_days_of_week(df):
             day_of_week_column.append(days_of_week[day_index])
         else:
             # Check if STRTTIME is less than the previous time, indicating a new day
-            if row['STRTTIME'] < prev_strttime:
+            if row['STRTTIME'] <= prev_strttime:
                 day_index = (day_index + 1) % 7  # Move to the next day, wrap around after Sunday
 
             # Append the current day of the week to the list
@@ -235,7 +212,6 @@ def assign_days_of_week(df):
 
 
 def identify_charging_sessions(df):
-
     # Sort by HOUSEID, PERSONID, VEHID, and order to ensure chronological order within each group
     df = df.sort_values(by=['HOUSEID', 'PERSONID', 'VEHID', 'order']).reset_index(drop=True)
 
@@ -243,6 +219,7 @@ def identify_charging_sessions(df):
     df['charging'] = df.groupby(['HOUSEID', 'PERSONID', 'VEHID'])['SOC'].diff().fillna(0) > 0
 
     return df
+
 
 def calculate_days_between_charges_synt(df):
     # Define a mapping from days of the week to numeric values
@@ -291,11 +268,14 @@ def calculate_days_between_charges_synt(df):
 
     # Filter out None values and the first row (order == 1) for each unique vehicle for plotting
     df_filtered = df[(df['days_between_charges'].notna()) & (df['order'] != 1)]
-    # Plot the box plot for days_between_charges
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(data=df_filtered, x='days_between_charges')
-    plt.xlabel("Days Between Charges")
-    plt.title("Distribution of Days Between Charges")
+
+    # Plot the box plot for days_between_charges grouped by battery capacity (BATTCAP)
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(data=df_filtered, x='BATTCAP', y='days_between_charges')
+    plt.xlabel("Battery Capacity (kWh)")
+    plt.ylabel("Days Between Charges")
+    plt.title("Distribution of Days Between Charges by Battery Capacity")
+    plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
     plt.show()
 
     return df, df_filtered
@@ -380,7 +360,7 @@ def create_charging_demand_curve_agg(df):
 
 def create_charging_demand_curve(df):
     # Step 1: Divide `day_of_year` into 14 periods
-    df["Period_Day"] = (df["day_of_year"] - 1)# Map day_of_year to one of 14 periods
+    df["Period_Day"] = (df["day_of_year"] - 1)  # Map day_of_year to one of 14 periods
 
     # Step 2: Round start_time and end_time to the nearest 30 minutes
     def round_to_half_hour(timestamp):
@@ -494,6 +474,7 @@ def plot_charging_demand_curve(demand_curve_df):
     plt.legend()
     plt.show()
 
+
 def map_whytrp1s_to_destination(df, column="WHYTRP1S"):
     whytrp1s_mapping = {
         1: "Home",
@@ -521,6 +502,7 @@ def determine_charging_level(row):
 
     # Define a function to assign charging speed
 
+
 def determine_charging_speed(charging_level):
     if charging_level == "Level_2":
         return 6.6  # Level 2 charging speed
@@ -528,6 +510,7 @@ def determine_charging_speed(charging_level):
         return 150  # DC Fast charging speed
     else:
         return None  # No charging speed if there's no charging level
+
 
 def batt_kwh(bat_cap):
     return bat_cap * 2.77778e-7
@@ -580,10 +563,10 @@ def calculate_charging_times(df):
 
     return df
 
-def calculate_charging_energy(df):
 
+def calculate_charging_energy(df):
     # Ensure the DataFrame is sorted to allow correct computation
-    df = df.sort_values(by=["HOUSEID", "PERSONID", "VEHID", "order"]).reset_index(drop=True)
+    df = df.sort_values(by=["HOUSEID", "PERSONID", "VEHID", "order", "TripOrder"]).reset_index(drop=True)
 
     # Initialize the new column
     df["Charged_Energy"] = np.nan
@@ -608,14 +591,14 @@ def calculate_charging_energy(df):
                 charged_energy = current_soc_energy - (previous_soc_energy - current_trip_energy)
 
                 # Assign the value to the current row
-                df.loc[current_idx, "Charged_Energy"] = max(0, charged_energy) / 3.6e6 # Ensure non-negative values
+                df.loc[current_idx, "Charged_Energy"] = max(0, charged_energy) / 3.6e6  # Ensure non-negative values
 
     return df
 
 
 def assign_day_numbers(df):
     # Ensure the DataFrame is sorted to detect day changes
-    df = df.sort_values(by=["HOUSEID", "PERSONID", "VEHID", "order"]).reset_index(drop=True)
+    df = df.sort_values(by=["HOUSEID", "PERSONID", "VEHID", "order", "TripOrder"]).reset_index(drop=True)
 
     # Initialize the new column
     df["Day_Number"] = np.nan
@@ -638,17 +621,18 @@ def assign_day_numbers(df):
 
     return df
 
+
 def calculate_trip_energy(df, vmt_column="TRPMILES", consumption_factor=782.928):
     # Convert VMT_Mile to meters (1 mile = 1609.34 meters)
     df["Trip_Distance_Meters"] = df[vmt_column] * 1609.34
 
     # Calculate trip energy in Joules
-    df["Trip_Energy"] = df["Trip_Distance_Meters"] * consumption_factor # in jule
+    df["Trip_Energy"] = df["Trip_Distance_Meters"] * consumption_factor  # in jule
 
     return df
 
 
-def create_weekly_charging_demand(df):
+def create_weekly_charging_demand(df, delay_charging=False):
     df = df[df["Day_Number"] <= 15]
     # Filter data for valid charging sessions
     charging_sessions = df[pd.notna(df["Charging_Level"])].copy()
@@ -691,6 +675,16 @@ def create_weekly_charging_demand(df):
 
     # Apply the rounding function
     charging_sessions["Start_Rounded"] = charging_sessions["Charging_Start_Time"].apply(round_to_half_hour)
+
+    if delay_charging:
+        # Delay charging sessions starting between 8 PM and 6 AM to midnight
+        def delay_to_midnight(start_time):
+            hour = start_time // 100
+            if hour >= 20 or hour < 6:  # Check if it's between 8 PM and 6 AM
+                return 0  # Delay to midnight (00:00 in HHMM format)
+            return start_time
+
+        charging_sessions["Start_Rounded"] = charging_sessions["Start_Rounded"].apply(delay_to_midnight)
 
     # Initialize the demand curve for 14 days (48 periods/day)
     max_days = 15
@@ -736,15 +730,24 @@ def create_weekly_charging_demand(df):
     return demand_curve
 
 
-def plot_charging_synt(weekly_demand_curve):
-    # Filter the data to include only Monday to Sunday (7 days)
-    weekly_demand_curve_filtered = weekly_demand_curve[weekly_demand_curve["Day"] < 15]
+def plot_charging_synt(weekly_demand_curve, state_name, delay_charging):
+    """
+    Plots the weekly charging demand curve.
 
-    # Create custom x-tick labels for 24-hour format across 7 days
-    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday"]
+    Parameters:
+    - weekly_demand_curve: DataFrame containing the demand curve data.
+    - state_name: Name of the state.
+    - delay_charging: Boolean indicating if delayed charging was applied.
+    """
+    # Filter the data to include only relevant days
+    weekly_demand_curve_filtered = weekly_demand_curve[weekly_demand_curve["Day"] < 15]
+    weekly_demand_curve_filtered["Day"] = weekly_demand_curve_filtered["Day"] - 7
+
+    # Create custom x-tick labels for 24-hour format across days
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Monday"]
 
     # Generate x-tick positions and labels for the entire week
-    x_ticks = np.arange(48, 48 * 16, 48)  # 48 periods per day
+    x_ticks = np.arange(48, 48 * 9, 48)  # 48 periods per day
     x_tick_labels = [f"{day}" for day in days]
 
     plt.figure(figsize=(12, 6))
@@ -764,14 +767,17 @@ def plot_charging_synt(weekly_demand_curve):
     for tick in x_ticks:
         plt.axvline(x=tick, color='grey', linestyle='--', linewidth=0.5)
 
-    # Add labels and title
+    # Add labels and title with state name and delay charging status
+    title = f"Weekly Charging Demand Curve for {state_name}"
+    title += " (Delayed Charging Enabled)" if delay_charging else " (Delayed Charging Disabled)"
+
     plt.xlabel("Day of the Week")
     plt.ylabel("Charging Demand (kWh)")
-    plt.title("Weekly Charging Demand Curve")
+    plt.title(title)
     plt.grid()
     plt.tight_layout()
     plt.show()
-# %%
+
 
 def plot_battery_market_share_pie(battery_capacities, probabilities):
     """
@@ -803,4 +809,3 @@ def plot_battery_market_share_pie(battery_capacities, probabilities):
     # Display the plot
     plt.tight_layout()
     plt.show()
-
