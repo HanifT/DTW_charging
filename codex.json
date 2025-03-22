@@ -1,0 +1,4 @@
+{
+    "pickle_fast": "Data/charging_data_fast.pkl",
+    "pickle_slow": "Data/charging_data_slow.pkl"
+}

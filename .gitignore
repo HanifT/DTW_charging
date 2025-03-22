@@ -1,1 +1,15 @@
 .cache.sqlite
+
+Data/
+
+Data/charging_data
+
+
+*.png
+*.csv
+*.pkl
+*.npy
+
+
+
+
